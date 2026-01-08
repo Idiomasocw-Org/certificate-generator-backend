@@ -1,0 +1,35 @@
+import { jwtVerify, createRemoteJWKSet } from 'jose';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const JWKS_URL = `${SUPABASE_URL}/auth/v1/.well-known/jwks.json`;
+
+const JWKS = createRemoteJWKSet(new URL(JWKS_URL));
+
+export const authenticateUser = async (req, res, next) => {
+    try {
+        const authHeader = req.headers.authorization;
+
+        if (!authHeader) {
+            return res.status(401).json({ error: 'No authorization header provided' });
+        }
+
+        const token = authHeader.split(' ')[1];
+
+        if (!token) {
+            return res.status(401).json({ error: 'No token provided' });
+        }
+
+        const { payload } = await jwtVerify(token, JWKS);
+
+        // Opcional: Adjuntar info del usuario a la request
+        req.user = payload;
+
+        next();
+    } catch (error) {
+        console.error('Auth Error:', error.message);
+        return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+};
