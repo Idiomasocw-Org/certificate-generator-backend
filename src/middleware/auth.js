@@ -22,14 +22,23 @@ export const authenticateUser = async (req, res, next) => {
             return res.status(401).json({ error: 'No token provided' });
         }
 
-        const { payload } = await jwtVerify(token, JWKS);
+        const { payload } = await jwtVerify(token, JWKS, {
+            clockTolerance: '60s' // Tolera hasta 60 segundos de desfase
+        });
 
         // Opcional: Adjuntar info del usuario a la request
         req.user = payload;
 
         next();
     } catch (error) {
-        console.error('Auth Error:', error.message);
-        return res.status(401).json({ error: 'Invalid or expired token' });
+        console.error('--- Auth Error Detail ---');
+        console.error('Message:', error.message);
+        console.error('Code:', error.code);
+        if (error.reason) console.error('Reason:', error.reason);
+        console.error('--------------------------');
+        return res.status(401).json({
+            error: 'Invalid or expired token',
+            details: error.message
+        });
     }
 };
