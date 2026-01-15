@@ -83,44 +83,61 @@ app.post('/api/certificates', authenticateUser, async (req, res) => {
         const pdfDoc = await PDFDocument.load(pdfTemplateBuffer);
         pdfDoc.registerFontkit(fontkit);
 
-        const customFont = await pdfDoc.embedFont(oswaldBoldBuffer);
+        // Embeber fuentes
+        const oswaldBold = await pdfDoc.embedFont(oswaldBoldBuffer);
+        const montserratRegular = await pdfDoc.embedFont(montserratRegularBuffer);
+
         const pages = pdfDoc.getPages();
         const firstPage = pages[0];
-        const { height } = firstPage.getSize();
+        const { width, height } = firstPage.getSize();
 
-        // Escribir datos en el PDF (coordenadas según testPdf.js)
-        firstPage.drawText(student_name.toUpperCase(), {
-            x: 150,
-            y: height / 2 + 10,
-            size: 40,
-            font: customFont
+        // --- Dibujar Nombre (Oswald Bold, Grande, Centrado) ---
+        const studentNameUpper = student_name.toUpperCase();
+        const nameFontSize = 40;
+        const nameWidth = oswaldBold.widthOfTextAtSize(studentNameUpper, nameFontSize);
+
+        firstPage.drawText(studentNameUpper, {
+            x: (width - nameWidth) / 2, // Centrado horizontal
+            y: height / 2 + 15,
+            size: nameFontSize,
+            font: oswaldBold
         });
 
+        // --- Dibujar Nivel (Montserrat Regular, Centrado) ---
+        const levelText = `Nivel: ${course_level}`;
+        const levelFontSize = 18;
+        const levelWidth = montserratRegular.widthOfTextAtSize(levelText, levelFontSize);
+
+        firstPage.drawText(levelText, {
+            x: (width - levelWidth) / 2, // Centrado horizontal
+            y: height / 2 - 30, // Un poco más abajo del nombre
+            size: levelFontSize,
+            font: montserratRegular
+        });
+
+        // --- Dibujar Fecha (Montserrat Regular) ---
         firstPage.drawText(completion_date, {
-            x: 130,
-            y: 115,
+            x: 130, // Coordenada x fija según plantilla
+            y: 115, // Coordenada y fija según plantilla
             size: 15,
-            font: customFont
+            font: montserratRegular
         });
 
         const pdfBytes = await pdfDoc.save();
 
-        // 3. Guardar archivo localmente (opcionalmente podrías devolverlo al cliente)
+        // 3. Opcional: Guardar copia local y responder con el PDF binario
         const outputDir = path.join(__dirname, '../generated_certificates');
         if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir);
 
         const fileName = `certificate_${data[0].id}.pdf`;
-        const filePath = path.join(outputDir, fileName);
-        fs.writeFileSync(filePath, pdfBytes);
+        fs.writeFileSync(path.join(outputDir, fileName), pdfBytes);
 
-        console.log('✅ Certificado guardado en:', filePath);
+        // Responder con el PDF directamente
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename=${fileName}`);
+        res.send(Buffer.from(pdfBytes));
 
-        res.status(200).json({
-            success: true,
-            message: 'Certificado generado y guardado localmente',
-            certificateId: data[0].id,
-            fileName: fileName
-        });
+        console.log('✅ Certificado enviado al cliente:', fileName);
 
     } catch (err) {
         console.error('Server Error:', err);
