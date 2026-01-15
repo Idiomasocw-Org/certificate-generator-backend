@@ -93,32 +93,33 @@ app.post('/api/certificates', authenticateUser, async (req, res) => {
 
         // --- Dibujar Nombre (Oswald Bold, Grande, Centrado) ---
         const studentNameUpper = student_name.toUpperCase();
-        const nameFontSize = 40;
+        const nameFontSize = 50; // Aumentado para mayor impacto
         const nameWidth = oswaldBold.widthOfTextAtSize(studentNameUpper, nameFontSize);
 
         firstPage.drawText(studentNameUpper, {
-            x: (width - nameWidth) / 2, // Centrado horizontal
-            y: height / 2 + 15,
+            x: (width - nameWidth) / 2,
+            y: height / 2 + 5, // Ajustado según ejemplo visual
             size: nameFontSize,
             font: oswaldBold
         });
 
-        // --- Dibujar Nivel (Montserrat Regular, Centrado) ---
-        const levelText = `Nivel: ${course_level}`;
+        // --- Dibujar Frase de Nivel (Montserrat Regular, Centrada) ---
+        const levelText = `Por haber completado con éxito el nivel ${course_level} de Inglés`;
         const levelFontSize = 18;
         const levelWidth = montserratRegular.widthOfTextAtSize(levelText, levelFontSize);
 
         firstPage.drawText(levelText, {
-            x: (width - levelWidth) / 2, // Centrado horizontal
-            y: height / 2 - 30, // Un poco más abajo del nombre
+            x: (width - levelWidth) / 2,
+            y: height / 2 - 45, // Ubicado debajo del nombre
             size: levelFontSize,
             font: montserratRegular
         });
 
         // --- Dibujar Fecha (Montserrat Regular) ---
+        // Se mantiene la coordinada X del logo/firma pero ajustamos precisión
         firstPage.drawText(completion_date, {
-            x: 130, // Coordenada x fija según plantilla
-            y: 115, // Coordenada y fija según plantilla
+            x: 125,
+            y: 115,
             size: 15,
             font: montserratRegular
         });
