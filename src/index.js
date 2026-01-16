@@ -91,36 +91,54 @@ app.post('/api/certificates', authenticateUser, async (req, res) => {
         const firstPage = pages[0];
         const { width, height } = firstPage.getSize();
 
-        // --- Dibujar Nombre (Oswald Bold, Grande, Centrado) ---
+        // CÁLCULO DE CENTRO VISUAL
+        // El diseño tiene una barra lateral izquierda. Estimamos un offset para encontrar el centro de la zona "blanca".
+        // La flecha del usuario indica mover a la izquierda. Usamos un valor negativo fuerte.
+        const visualCenterXOffset = -60;
+        const effectiveCenterOnPage = (width / 2) + visualCenterXOffset;
+
+        // --- Dibujar Nombre (Oswald Bold, Ajustado) ---
         const studentNameUpper = student_name.toUpperCase();
-        const nameFontSize = 50; // Aumentado para mayor impacto
-        const nameWidth = oswaldBold.widthOfTextAtSize(studentNameUpper, nameFontSize);
+        let nameFontSize = 36;
+        let nameWidth = oswaldBold.widthOfTextAtSize(studentNameUpper, nameFontSize);
+
+        // Límite de ancho (reducido drásticamente para asegurar que no toque el sello)
+        // 0.35 es seguro para que nameWidth/2 no invada el espacio del sello a la derecha
+        const maxNameWidth = width * 0.35;
+
+        // Ajuste dinámico de fuente
+        while (nameWidth > maxNameWidth && nameFontSize > 10) {
+            nameFontSize -= 2;
+            nameWidth = oswaldBold.widthOfTextAtSize(studentNameUpper, nameFontSize);
+        }
 
         firstPage.drawText(studentNameUpper, {
-            x: (width - nameWidth) / 2,
-            y: height / 2 + 5, // Ajustado según ejemplo visual
+            x: effectiveCenterOnPage - (nameWidth / 2),
+            y: height / 2 - 10,
             size: nameFontSize,
             font: oswaldBold
         });
 
-        // --- Dibujar Frase de Nivel (Montserrat Regular, Centrada) ---
-        const levelText = `Por haber completado con éxito el nivel ${course_level} de Inglés`;
-        const levelFontSize = 18;
+        // --- Dibujar Nivel (Montserrat Regular, Solo Dato) ---
+        // Eliminamos el texto "For successfully completing..." que el usuario rechazó.
+        // Ponemos solo el nivel o "Nivel: X"
+        const levelText = course_level; // Opción minimalista
+        const levelFontSize = 14;
         const levelWidth = montserratRegular.widthOfTextAtSize(levelText, levelFontSize);
 
         firstPage.drawText(levelText, {
-            x: (width - levelWidth) / 2,
-            y: height / 2 - 45, // Ubicado debajo del nombre
+            x: effectiveCenterOnPage - (levelWidth / 2),
+            y: height / 2 - 40,
             size: levelFontSize,
             font: montserratRegular
         });
 
-        // --- Dibujar Fecha (Montserrat Regular) ---
-        // Se mantiene la coordinada X del logo/firma pero ajustamos precisión
+        // --- Dibujar Fecha (Montserrat Regular, Pequeña) ---
+        const dateFontSize = 12; // Tamaño reducido como se sugirió
         firstPage.drawText(completion_date, {
-            x: 125,
-            y: 115,
-            size: 15,
+            x: 130,
+            y: 118,
+            size: dateFontSize,
             font: montserratRegular
         });
 
