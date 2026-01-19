@@ -8,6 +8,14 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { PDFDocument } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
+import { z } from 'zod';
+
+// Esquema de validación Zod (Fase 5 - Seguridad)
+const CertificateSchema = z.object({
+    student_name: z.string().min(3, 'El nombre debe tener al menos 3 caracteres'),
+    course_level: z.string().min(2, 'El nivel debe tener al menos 2 caracteres'),
+    completion_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha debe tener formato YYYY-MM-DD')
+});
 
 dotenv.config();
 
@@ -60,12 +68,20 @@ app.get('/protected', authenticateUser, (req, res) => {
 // Ruta para guardar certificado y generar PDF
 app.post('/api/certificates', authenticateUser, async (req, res) => {
     try {
-        const { student_name, course_level, completion_date } = req.body;
-        const userId = req.user.sub;
-
-        if (!student_name || !course_level || !completion_date) {
-            return res.status(400).json({ error: 'Missing required fields' });
+        // Validación de datos con Zod (Fase 5 - Seguridad)
+        let validatedData;
+        try {
+            validatedData = CertificateSchema.parse(req.body);
+        } catch (validationError) {
+            console.error('❌ Validation Error:', validationError.errors);
+            return res.status(400).json({
+                error: 'Datos inválidos',
+                details: validationError.errors
+            });
         }
+
+        const { student_name, course_level, completion_date } = validatedData;
+        const userId = req.user.sub;
 
         // 1. Guardar en Base de Datos (Supabase)
         const { data, error } = await supabase
