@@ -12,9 +12,9 @@ import { z } from 'zod';
 
 // Esquema de validación Zod (Fase 5 - Seguridad)
 const CertificateSchema = z.object({
-    student_name: z.string().min(3, 'El nombre debe tener al menos 3 caracteres'),
-    course_level: z.string().min(2, 'El nivel debe tener al menos 2 caracteres'),
-    completion_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha debe tener formato YYYY-MM-DD')
+    studentName: z.string().min(3),
+    level: z.string().min(2),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha debe tener formato YYYY-MM-DD')
 });
 
 dotenv.config();
@@ -80,13 +80,13 @@ app.post('/api/certificates', authenticateUser, async (req, res) => {
             });
         }
 
-        const { student_name, course_level, completion_date } = validatedData;
+        const { studentName, level, date } = validatedData;
         const userId = req.user.sub;
 
         // 1. Guardar en Base de Datos (Supabase)
         const { data, error } = await supabase
             .from('certificates_history')
-            .insert([{ user_id: userId, student_name, course_level, completion_date }])
+            .insert([{ user_id: userId, student_name: studentName, course_level: level, completion_date: date }])
             .select();
 
         if (error) {
@@ -95,7 +95,7 @@ app.post('/api/certificates', authenticateUser, async (req, res) => {
         }
 
         // 2. Generar PDF en Memoria
-        console.log('📄 Generando PDF para:', student_name);
+        console.log('📄 Generando PDF para:', studentName);
         const pdfDoc = await PDFDocument.load(pdfTemplateBuffer);
         pdfDoc.registerFontkit(fontkit);
 
@@ -114,7 +114,7 @@ app.post('/api/certificates', authenticateUser, async (req, res) => {
         const effectiveCenterOnPage = (width / 2) + visualCenterXOffset;
 
         // --- Dibujar Nombre (Oswald Bold, Ajustado) ---
-        const studentNameUpper = student_name.toUpperCase();
+        const studentNameUpper = studentName.toUpperCase();
         let nameFontSize = 36;
         let nameWidth = oswaldBold.widthOfTextAtSize(studentNameUpper, nameFontSize);
 
@@ -138,7 +138,7 @@ app.post('/api/certificates', authenticateUser, async (req, res) => {
         // --- Dibujar Nivel (Montserrat Regular, Solo Dato) ---
         // Eliminamos el texto "For successfully completing..." que el usuario rechazó.
         // Ponemos solo el nivel o "Nivel: X"
-        const levelText = course_level; // Opción minimalista
+        const levelText = level; // Opción minimalista
         const levelFontSize = 14;
         const levelWidth = montserratRegular.widthOfTextAtSize(levelText, levelFontSize);
 
@@ -151,7 +151,7 @@ app.post('/api/certificates', authenticateUser, async (req, res) => {
 
         // --- Dibujar Fecha (Montserrat Regular, Pequeña) ---
         const dateFontSize = 12; // Tamaño reducido como se sugirió
-        firstPage.drawText(completion_date, {
+        firstPage.drawText(date, {
             x: 130,
             y: 118,
             size: dateFontSize,
