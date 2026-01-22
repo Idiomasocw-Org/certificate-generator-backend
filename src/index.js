@@ -57,6 +57,30 @@ app.get('/', (req, res) => {
     res.send('API Running');
 });
 
+// Ruta para obtener el historial de certificados del usuario
+app.get('/api/certificates', authenticateUser, async (req, res) => {
+    try {
+        const userId = req.user.sub;
+
+        const { data, error } = await supabase
+            .from('certificates_history')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+        if (error) {
+            console.error('Supabase Error:', error);
+            return res.status(500).json({ error: error.message });
+        }
+
+        res.json(data);
+    } catch (err) {
+        console.error('Server Error:', err);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
 // Ruta protegida de prueba
 app.get('/protected', authenticateUser, (req, res) => {
     res.json({
