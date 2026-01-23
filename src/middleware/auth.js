@@ -42,3 +42,18 @@ export const authenticateUser = async (req, res, next) => {
         });
     }
 };
+
+export const requireAdmin = (req, res, next) => {
+    const ADMIN_EMAIL = 'barbaraarias844@gmail.com';
+
+    if (!req.user || !req.user.email) {
+        return res.status(403).json({ error: 'Access denied: No user info found' });
+    }
+
+    if (req.user.email !== ADMIN_EMAIL) {
+        console.warn(`⛔ Acceso denegado a historial para: ${req.user.email}`);
+        return res.status(403).json({ error: 'Access denied: Admins only' });
+    }
+
+    next();
+};
