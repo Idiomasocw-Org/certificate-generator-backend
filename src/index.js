@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { authenticateUser } from './middleware/auth.js';
+import { authenticateUser, requireAdmin } from './middleware/auth.js';
 import { supabase } from './lib/supabase.js';
 import fs from 'fs';
 import path from 'path';
@@ -13,7 +13,7 @@ import { z } from 'zod';
 // Esquema de validación Zod (Fase 5 - Seguridad)
 const CertificateSchema = z.object({
     studentName: z.string().min(3),
-    level: z.string().min(2),
+    level: z.enum(['A1', 'A2', 'B1', 'B2', 'C1']), // Niveles oficiales CEFR
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha debe tener formato YYYY-MM-DD')
 });
 
@@ -159,10 +159,8 @@ app.post('/api/certificates', authenticateUser, async (req, res) => {
             font: oswaldBold
         });
 
-        // --- Dibujar Nivel (Montserrat Regular, Solo Dato) ---
-        // Eliminamos el texto "For successfully completing..." que el usuario rechazó.
-        // Ponemos solo el nivel o "Nivel: X"
-        const levelText = level; // Opción minimalista
+        // --- Dibujar Nivel (Frase de Aprobación Completa) ---
+        const levelText = `For successfully completing and passing the ${level} level of English`;
         const levelFontSize = 14;
         const levelWidth = montserratRegular.widthOfTextAtSize(levelText, levelFontSize);
 
