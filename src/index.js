@@ -1,207 +1,200 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { authenticateUser, requireAdmin } from './middleware/auth.js';
+import { authenticateUser } from './middleware/auth.js';
 import { supabase } from './lib/supabase.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import { z } from 'zod';
 
-// Esquema de validación Zod (Fase 5 - Seguridad)
+// Esquema de validación Zod
 const CertificateSchema = z.object({
     studentName: z.string().min(3),
-    level: z.enum(['A1', 'A2', 'B1', 'B2', 'C1']), // Niveles oficiales CEFR
-    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha debe tener formato YYYY-MM-DD')
+    level: z.enum(['A1', 'A2', 'B1', 'B2', 'C1']),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 });
 
 dotenv.config();
 
-// Fix for __dirname in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Supabase client imported from lib
-// --- PDF ASSETS LOADING ---
-let pdfTemplateBuffer;
-let oswaldBoldBuffer;
-let montserratBoldBuffer;
-let montserratRegularBuffer;
-
-try {
-    const assetsPath = path.join(__dirname, 'assets');
-    pdfTemplateBuffer = fs.readFileSync(path.join(assetsPath, 'templates/certificate-template.pdf'));
-    oswaldBoldBuffer = fs.readFileSync(path.join(assetsPath, 'fonts/Oswald-Bold.ttf'));
-    montserratBoldBuffer = fs.readFileSync(path.join(assetsPath, 'fonts/Montserrat-Bold.ttf'));
-    montserratRegularBuffer = fs.readFileSync(path.join(assetsPath, 'fonts/Montserrat-Regular.ttf'));
-
-    console.log('✅ PDF Template loaded:', pdfTemplateBuffer.length, 'bytes');
-    console.log('✅ Fonts loaded: Oswald-Bold, Montserrat-Bold, Montserrat-Regular');
-} catch (error) {
-    console.error('❌ Error loading PDF assets:', error.message);
-}
+const projectRoot = path.join(__dirname, '..');
+const assetsPath = fs.existsSync(path.join(__dirname, 'assets'))
+    ? path.join(__dirname, 'assets')
+    : path.join(projectRoot, 'assets');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuración de CORS
+// Configuración de CORS Robusta para Cloudflare
 app.use(cors({
-    origin: 'http://localhost:5173',
+    origin: (origin, callback) => {
+        const allowed = ['http://localhost:5173', 'http://localhost:3000'];
+        if (!origin || allowed.includes(origin) || origin.endsWith('.trycloudflare.com')) {
+            callback(null, true);
+        } else {
+            callback(new Error('CORS Blocked'));
+        }
+    },
     credentials: true
 }));
 app.use(express.json());
 
-app.get('/', (req, res) => {
-    res.send('API Running');
-});
+// Función para cargar fuentes
+const getFontBuffer = (fontName) => {
+    const fontPath = path.join(assetsPath, 'fonts', fontName);
+    return fs.existsSync(fontPath) ? fs.readFileSync(fontPath) : null;
+};
 
-// Ruta para obtener el historial de certificados del usuario
+// --- RUTAS RESTAURADAS ---
+
 app.get('/api/certificates', authenticateUser, async (req, res) => {
     try {
-        const userId = req.user.sub;
-
         const { data, error } = await supabase
             .from('certificates_history')
             .select('*')
-            .eq('user_id', userId)
+            .eq('user_id', req.user.sub)
             .order('created_at', { ascending: false })
             .limit(10);
-
-        if (error) {
-            console.error('Supabase Error:', error);
-            return res.status(500).json({ error: error.message });
-        }
-
+        if (error) throw error;
         res.json(data);
     } catch (err) {
-        console.error('Server Error:', err);
-        res.status(500).json({ error: 'Internal Server Error' });
+        console.error('❌ Error fetching history:', err);
+        res.status(500).json({ error: err.message });
     }
 });
 
-// Ruta protegida de prueba
-app.get('/protected', authenticateUser, (req, res) => {
-    res.json({
-        message: 'Acceso autorizado',
-        user: req.user
-    });
-});
-
-// Ruta para guardar certificado y generar PDF
 app.post('/api/certificates', authenticateUser, async (req, res) => {
     try {
-        // Validación de datos con Zod (Fase 5 - Seguridad)
-        let validatedData;
-        try {
-            validatedData = CertificateSchema.parse(req.body);
-        } catch (validationError) {
-            console.error('❌ Validation Error:', validationError.errors);
-            return res.status(400).json({
-                error: 'Datos inválidos',
-                details: validationError.errors
+        console.log('📥 Petición recibida:', req.body);
+        const validated = CertificateSchema.parse(req.body);
+        const { studentName, level, date } = validated;
+
+        // Guardar en Supabase
+        const { error: dbError } = await supabase
+            .from('certificates_history')
+            .insert([{
+                user_id: req.user.sub,
+                student_name: studentName,
+                course_level: level,
+                completion_date: date
+            }]);
+        if (dbError) throw dbError;
+
+        // Generar PDF
+        const templatePath = path.join(assetsPath, 'templates/certificate-template.pdf');
+        if (!fs.existsSync(templatePath)) throw new Error('Plantilla PDF no encontrada');
+
+        const pdfDoc = await PDFDocument.load(fs.readFileSync(templatePath));
+        pdfDoc.registerFontkit(fontkit);
+
+        // Carga segura de fuentes
+        const boldBuffer = getFontBuffer('Montserrat-Bold.ttf');
+        const regularBuffer = getFontBuffer('Montserrat-Regular.ttf');
+        const italicBuffer = getFontBuffer('Montserrat-LightItalic.ttf');
+        const oswaldBuffer = getFontBuffer('Oswald-Bold.ttf'); // La fuente "condensada" del ejemplo
+
+        const fontBold = boldBuffer ? await pdfDoc.embedFont(boldBuffer) : await pdfDoc.embedStandardFont('Helvetica-Bold');
+        const fontRegular = regularBuffer ? await pdfDoc.embedFont(regularBuffer) : await pdfDoc.embedStandardFont('Helvetica');
+        const fontItalic = italicBuffer ? await pdfDoc.embedFont(italicBuffer) : fontRegular;
+        const fontOswald = oswaldBuffer ? await pdfDoc.embedFont(oswaldBuffer) : fontBold;
+
+        const page = pdfDoc.getPages()[0];
+        const { height } = page.getSize();
+
+        // --- CONFIGURACIÓN DE DISEÑO PROFESIONAL ---
+        const config = {
+            x: 95,                  // Margen izquierdo general
+            xDate: 95,              // Alineado con el margen izquierdo
+            nameY: height / 2 + 40, // Altura vertical del nombre
+            lineHeight: 62,         // Espacio entre líneas del nombre
+            dateY: 108,             // Posición sobre la línea de DATE
+            maxWidth: 420,
+            baseSize: 42,           // <--- REDUCIDO: Tamaño más elegante
+            levelSize: 11,          // Tamaño minimalista para frase de nivel
+            dateSize: 11            // Tamaño minimalista para fecha
+        };
+
+        // --- LÓGICA DE SEPARACIÓN INTELIGENTE ---
+        const words = studentName.trim().split(/\s+/);
+        let firstName = "";
+        let lastName = "";
+
+        if (words.length >= 4) {
+            // Ejemplo: BARBARA ANDREA (arriba) / ARIAS BUROZ (abajo)
+            firstName = `${words[0]} ${words[1]}`.toUpperCase();
+            lastName = words.slice(2).join(' ').toUpperCase();
+        } else if (words.length === 3) {
+            // Ejemplo: JUAN (arriba) / PABLO BEDOYA (abajo)
+            firstName = words[0].toUpperCase();
+            lastName = `${words[1]} ${words[2]}`.toUpperCase();
+        } else {
+            // Caso de 2 palabras
+            firstName = words[0].toUpperCase();
+            lastName = words.slice(1).join(' ').toUpperCase();
+        }
+
+        const getFontSize = (text) => {
+            const width = fontOswald.widthOfTextAtSize(text, config.baseSize);
+            return width > config.maxWidth ? (config.maxWidth / width) * config.baseSize : config.baseSize;
+        };
+
+        // 1. DIBUJAR NOMBRE (Oswald-Bold)
+        page.drawText(firstName, {
+            x: config.x,
+            y: config.nameY,
+            size: getFontSize(firstName),
+            font: fontOswald,
+            color: rgb(0.05, 0.1, 0.2)
+        });
+
+        // 2. DIBUJAR APELLIDO (Oswald-Bold)
+        if (lastName) {
+            page.drawText(lastName, {
+                x: config.x,
+                y: config.nameY - config.lineHeight,
+                size: getFontSize(lastName),
+                font: fontOswald,
+                color: rgb(0.05, 0.1, 0.2)
             });
         }
 
-        const { studentName, level, date } = validatedData;
-        const userId = req.user.sub;
-
-        // 1. Guardar en Base de Datos (Supabase)
-        const { data, error } = await supabase
-            .from('certificates_history')
-            .insert([{ user_id: userId, student_name: studentName, course_level: level, completion_date: date }])
-            .select();
-
-        if (error) {
-            console.error('Supabase Error:', error);
-            return res.status(500).json({ error: error.message });
-        }
-
-        // 2. Generar PDF en Memoria
-        console.log('📄 Generando PDF para:', studentName);
-        const pdfDoc = await PDFDocument.load(pdfTemplateBuffer);
-        pdfDoc.registerFontkit(fontkit);
-
-        // Embeber fuentes
-        const oswaldBold = await pdfDoc.embedFont(oswaldBoldBuffer);
-        const montserratRegular = await pdfDoc.embedFont(montserratRegularBuffer);
-
-        const pages = pdfDoc.getPages();
-        const firstPage = pages[0];
-        const { width, height } = firstPage.getSize();
-
-        // CÁLCULO DE CENTRO VISUAL
-        // El diseño tiene una barra lateral izquierda. Estimamos un offset para encontrar el centro de la zona "blanca".
-        // La flecha del usuario indica mover a la izquierda. Usamos un valor negativo fuerte.
-        const visualCenterXOffset = -60;
-        const effectiveCenterOnPage = (width / 2) + visualCenterXOffset;
-
-        // --- Dibujar Nombre (Oswald Bold, Ajustado) ---
-        const studentNameUpper = studentName.toUpperCase();
-        let nameFontSize = 36;
-        let nameWidth = oswaldBold.widthOfTextAtSize(studentNameUpper, nameFontSize);
-
-        // Límite de ancho (reducido drásticamente para asegurar que no toque el sello)
-        // 0.35 es seguro para que nameWidth/2 no invada el espacio del sello a la derecha
-        const maxNameWidth = width * 0.35;
-
-        // Ajuste dinámico de fuente
-        while (nameWidth > maxNameWidth && nameFontSize > 10) {
-            nameFontSize -= 2;
-            nameWidth = oswaldBold.widthOfTextAtSize(studentNameUpper, nameFontSize);
-        }
-
-        firstPage.drawText(studentNameUpper, {
-            x: effectiveCenterOnPage - (nameWidth / 2),
-            y: height / 2 - 10,
-            size: nameFontSize,
-            font: oswaldBold
+        // 3. FRASE DE NIVEL (Montserrat-Light style)
+        // Usamos un gris más claro (0.5) para imitar la fuente "Light" del ejemplo
+        page.drawText(`For successfully completing and passing the ${level} level of English`, {
+            x: config.x,
+            y: config.nameY - config.lineHeight - 38, // <--- AJUSTADO: Subido para que no quede tan lejos
+            size: config.levelSize,
+            font: fontItalic,
+            color: rgb(0.5, 0.5, 0.5)
         });
 
-        // --- Dibujar Nivel (Frase de Aprobación Completa) ---
-        const levelText = `For successfully completing and passing the ${level} level of English`;
-        const levelFontSize = 14;
-        const levelWidth = montserratRegular.widthOfTextAtSize(levelText, levelFontSize);
-
-        firstPage.drawText(levelText, {
-            x: effectiveCenterOnPage - (levelWidth / 2),
-            y: height / 2 - 40,
-            size: levelFontSize,
-            font: montserratRegular
+        // 4. FECHA (Montserrat-Regular)
+        const [year, month, day] = date.split('-');
+        page.drawText(`${day}/${month}/${year}`, {
+            x: config.xDate,
+            y: config.dateY,
+            size: config.dateSize,
+            font: fontRegular,
+            color: rgb(0.5, 0.5, 0.5) // Gris claro para estilo minimalista
         });
 
-        // --- Dibujar Fecha (Montserrat Regular, Pequeña) ---
-        const dateFontSize = 12; // Tamaño reducido como se sugirió
-        firstPage.drawText(date, {
-            x: 130,
-            y: 118,
-            size: dateFontSize,
-            font: montserratRegular
-        });
 
         const pdfBytes = await pdfDoc.save();
-
-        // 3. Opcional: Guardar copia local y responder con el PDF binario
-        const outputDir = path.join(__dirname, '../generated_certificates');
-        if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir);
-
-        const fileName = `certificate_${data[0].id}.pdf`;
-        fs.writeFileSync(path.join(outputDir, fileName), pdfBytes);
-
-        // Responder con el PDF directamente
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename=${fileName}`);
         res.send(Buffer.from(pdfBytes));
 
-        console.log('✅ Certificado enviado al cliente:', fileName);
-
     } catch (err) {
-        console.error('Server Error:', err);
-        res.status(500).json({ error: 'Internal Server Error' });
+        console.error('❌ Error generating certificate:', err);
+        const errorMessage = err.name === 'ZodError'
+            ? 'Datos inválidos: ' + err.errors.map(e => `${e.path}: ${e.message}`).join(', ')
+            : err.message;
+        res.status(400).json({ error: errorMessage });
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-});
+app.listen(PORT, () => console.log(`🚀 Server en puerto ${PORT}`));
