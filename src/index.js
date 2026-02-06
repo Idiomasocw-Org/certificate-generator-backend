@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import cookieParser from 'cookie-parser';
 import { authenticateUser } from './middleware/auth.js';
 import { supabase, getSupabaseUserClient } from './lib/supabase.js';
 import fs from 'fs';
@@ -9,6 +10,8 @@ import { fileURLToPath } from 'url';
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import { z } from 'zod';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 
 // Esquema de validación Zod
 const CertificateSchema = z.object({
@@ -43,6 +46,7 @@ app.use(cors({
     credentials: true
 }));
 app.use(express.json());
+app.use(cookieParser());
 
 // Función para cargar fuentes
 const getFontBuffer = (fontName) => {
@@ -50,18 +54,98 @@ const getFontBuffer = (fontName) => {
     return fs.existsSync(fontPath) ? fs.readFileSync(fontPath) : null;
 };
 
-// --- RUTAS ACTUALIZADAS CON SOPORTE RLS ---
+const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
+
+// --- RUTAS DE AUTENTICACIÓN LOCAL ---
+
+app.post('/api/auth/register', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        if (!email || !password) return res.status(400).json({ error: 'Email y password requeridos' });
+
+        const normalizedEmail = email.toLowerCase().trim();
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        const { data, error } = await supabase
+            .from('users_custom')
+            .insert([{ email: normalizedEmail, password: hashedPassword }])
+            .select()
+            .single();
+
+        if (error) {
+            if (error.code === '23505') return res.status(409).json({ error: 'El email ya está registrado' });
+            throw error;
+        }
+        res.status(201).json({ message: 'Usuario creado', user: { id: data.id, email: data.email } });
+    } catch (err) {
+        console.error('❌ Error en registro detallado:', {
+            message: err.message,
+            code: err.code,
+            details: err.details,
+            hint: err.hint
+        });
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        const normalizedEmail = email.toLowerCase().trim();
+        console.log('🔑 Intento de login para:', normalizedEmail);
+
+        const { data: user, error } = await supabase
+            .from('users_custom')
+            .select('*')
+            .eq('email', normalizedEmail)
+            .single();
+
+        if (error || !user) {
+            console.warn('⚠️ Usuario no encontrado:', normalizedEmail);
+            return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
+        }
+
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            console.warn('⛔ Contraseña incorrecta para:', normalizedEmail);
+            return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
+        }
+
+        const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '1d' });
+
+        // Enviar token en Cookie HttpOnly
+        res.cookie('auth_token', token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: 24 * 60 * 60 * 1000 // 1 día
+        });
+
+        console.log('✅ Login exitoso para:', normalizedEmail);
+        res.json({ user: { id: user.id, email: user.email } });
+    } catch (err) {
+        console.error('❌ Error en login:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/auth/logout', (req, res) => {
+    res.clearCookie('auth_token');
+    res.json({ message: 'Sesión cerrada' });
+});
+
+app.get('/api/auth/me', authenticateUser, (req, res) => {
+    res.json({ user: req.user });
+});
+
+// --- RUTAS DE CERTIFICADOS (USANDO AUTH LOCAL) ---
 
 app.get('/api/certificates', authenticateUser, async (req, res) => {
     try {
-        // Obtenemos el token del header para el cliente autenticado
-        const token = req.headers.authorization.split(' ')[1];
-        const userClient = getSupabaseUserClient(token);
-
-        const { data, error } = await userClient
+        const { data, error } = await supabase
             .from('certificates_history')
             .select('*')
-            .eq('user_id', req.user.sub)
+            .eq('user_id', req.user.id)
             .order('created_at', { ascending: false })
             .limit(10);
 
@@ -79,15 +163,11 @@ app.post('/api/certificates', authenticateUser, async (req, res) => {
         const validated = CertificateSchema.parse(req.body);
         const { studentName, level, date } = validated;
 
-        // 1. Obtener token y crear cliente con rol "authenticated"
-        const token = req.headers.authorization.split(' ')[1];
-        const userClient = getSupabaseUserClient(token);
-
-        // 2. Guardar en Supabase usando el cliente que cumple la política RLS
-        const { error: dbError } = await userClient
+        // 2. Guardar en Supabase usando el id del token local
+        const { error: dbError } = await supabase
             .from('certificates_history')
             .insert([{
-                user_id: req.user.sub,
+                user_id: req.user.id,
                 student_name: studentName,
                 course_level: level,
                 completion_date: date

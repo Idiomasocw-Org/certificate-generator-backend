@@ -1,30 +1,22 @@
-import { jwtVerify, createRemoteJWKSet } from 'jose';
+import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const JWKS_URL = `${SUPABASE_URL}/auth/v1/.well-known/jwks.json`;
+const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
 
-// Configuración del set de llaves remotas de Supabase
-const JWKS = createRemoteJWKSet(new URL(JWKS_URL));
+export const authenticateUser = (req, res, next) => {
+    // Intentar obtener el token de cookies primero, luego de Authorization header
+    const token = req.cookies.auth_token || (req.headers.authorization ? req.headers.authorization.split(' ')[1] : null);
 
-export const authenticateUser = async (req, res, next) => {
-    const authHeader = req.headers.authorization;
-
-    if (!authHeader) {
-        return res.status(401).json({ error: 'No authorization header' });
+    if (!token) {
+        return res.status(401).json({ error: 'No authorization token found' });
     }
 
-    const token = authHeader.split(' ')[1];
-
     try {
-        const { payload } = await jwtVerify(token, JWKS, {
-            clockTolerance: '60s' 
-        });
-
-        console.log('✅ Token verificado para:', payload.email);
-        req.user = payload; // Adjuntamos el usuario a la request
+        const decoded = jwt.verify(token, JWT_SECRET);
+        req.user = decoded;
+        console.log('✅ Token verificado para:', decoded.email);
         next();
     } catch (error) {
         console.error('--- Auth Error Detail ---');
@@ -44,7 +36,7 @@ export const requireAdmin = (req, res, next) => {
     }
 
     if (req.user.email !== ADMIN_EMAIL) {
-        console.warn(`⛔ Acceso denegado a historial para: ${req.user.email}`);
+        console.warn(`⛔ Acceso denegado: ${req.user.email}`);
         return res.status(403).json({ error: 'Access denied: Admins only' });
     }
 
