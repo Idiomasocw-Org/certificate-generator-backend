@@ -33,7 +33,7 @@ const PORT = process.env.PORT || 3000;
 // Configuración de CORS Robusta para Cloudflare
 app.use(cors({
     origin: (origin, callback) => {
-        const allowed = ['http://localhost:5173', 'http://localhost:3000'];
+        const allowed = ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000'];
         if (!origin || allowed.includes(origin) || origin.endsWith('.trycloudflare.com')) {
             callback(null, true);
         } else {
