@@ -1,0 +1,7 @@
+
+> certificate-generator-backend@1.0.0 dev
+> node src/index.js
+
+🔗 Conectando a Supabase: https://hpbaxcgecmxffsiwpboz.supabase.co
+🔑 Usando llave: sb_secret_...
+🚀 Server en puerto 3000

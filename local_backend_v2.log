@@ -1,0 +1,22 @@
+
+> certificate-generator-backend@1.0.0 dev
+> node src/index.js
+
+🔗 Conectando a Supabase: https://hpbaxcgecmxffsiwpboz.supabase.co
+🔑 Usando llave: sb_secret_...
+🚀 Server en puerto 3000
+🔑 Intento de login para: admin@ocw.com
+✅ Login exitoso para: admin@ocw.com
+✅ Token verificado para: admin@ocw.com
+✅ Token verificado para: admin@ocw.com
+📥 Petición recibida: { studentName: 'Alumno de Prueba', level: 'B2', date: '2026-06-02' }
+✅ Token verificado para: admin@ocw.com
+✅ Token verificado para: barbaraarias844@gmail.com
+✅ Token verificado para: barbaraarias844@gmail.com
+✅ Token verificado para: barbaraarias844@gmail.com
+✅ Token verificado para: barbaraarias844@gmail.com
+✅ Token verificado para: barbaraarias844@gmail.com
+✅ Token verificado para: barbaraarias844@gmail.com
+✅ Token verificado para: barbaraarias844@gmail.com
+📥 Petición recibida: { studentName: 'barbara buroz', level: 'C1', date: '2026-02-09' }
+✅ Token verificado para: barbaraarias844@gmail.com

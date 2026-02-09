@@ -1,0 +1,14 @@
+
+> certificate-generator-backend@1.0.0 dev
+> node src/index.js
+
+🔗 Conectando a Supabase: https://hpbaxcgecmxffsiwpboz.supabase.co
+🔑 Usando llave: sb_secret_...
+🚀 Server en puerto 3000
+🔑 Intento de login para: barbaraarias844@gmail.com
+✅ Login exitoso para: barbaraarias844@gmail.com
+✅ Token verificado para: barbaraarias844@gmail.com
+✅ Token verificado para: barbaraarias844@gmail.com
+✅ Token verificado para: barbaraarias844@gmail.com
+📥 Petición recibida: { studentName: 'barbara arias buroz', level: 'A2', date: '2026-02-09' }
+✅ Token verificado para: barbaraarias844@gmail.com
