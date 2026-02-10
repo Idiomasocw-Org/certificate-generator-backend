@@ -1,17 +1,39 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
+import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { authenticateUser } from '../middleware/auth.js';
+import { authLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
 
-router.post('/register', async (req, res) => {
-    try {
-        const { email, password } = req.body;
-        if (!email || !password) return res.status(400).json({ error: 'Email y password requeridos' });
+// Validation schemas
+const registerSchema = z.object({
+    email: z.string().email('Email inválido'),
+    password: z.string()
+        .min(8, 'La contraseña debe tener al menos 8 caracteres')
+        .regex(/[A-Z]/, 'La contraseña debe contener al menos una mayúscula')
+        .regex(/[0-9]/, 'La contraseña debe contener al menos un número')
+});
 
+const loginSchema = z.object({
+    email: z.string().email('Email inválido'),
+    password: z.string().min(1, 'Contraseña requerida')
+});
+
+router.post('/register', authLimiter, async (req, res) => {
+    try {
+        // Validate input with Zod
+        const validation = registerSchema.safeParse(req.body);
+        if (!validation.success) {
+            const firstError = validation.error.errors[0];
+            return res.status(400).json({ error: firstError.message });
+        }
+
+        const { email, password } = validation.data;
         const normalizedEmail = email.toLowerCase().trim();
         const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -31,9 +53,16 @@ router.post('/register', async (req, res) => {
     }
 });
 
-router.post('/login', async (req, res) => {
+router.post('/login', authLimiter, async (req, res) => {
     try {
-        const { email, password } = req.body;
+        // Validate input with Zod
+        const validation = loginSchema.safeParse(req.body);
+        if (!validation.success) {
+            const firstError = validation.error.errors[0];
+            return res.status(400).json({ error: firstError.message });
+        }
+
+        const { email, password } = validation.data;
         const normalizedEmail = email.toLowerCase().trim();
 
         const { data: user, error } = await supabase
@@ -105,6 +134,139 @@ router.post('/refresh', (req, res) => {
         res.json({ message: 'Token refreshed' });
     } catch (err) {
         res.status(401).json({ error: 'Invalid refresh token' });
+    }
+});
+
+router.post('/change-password', authenticateUser, async (req, res) => {
+    try {
+        const { oldPassword, newPassword } = req.body;
+        if (!oldPassword || !newPassword) {
+            return res.status(400).json({ error: 'Se requieren ambas contraseñas' });
+        }
+
+        if (newPassword.length < 6) {
+            return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 6 caracteres' });
+        }
+
+        // 1. Obtener el usuario actual
+        const { data: user, error: fetchError } = await supabase
+            .from('users_custom')
+            .select('*')
+            .eq('id', req.user.id)
+            .single();
+
+        if (fetchError || !user) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        // 2. Verificar contraseña antigua
+        const isMatch = await bcrypt.compare(oldPassword, user.password);
+        if (!isMatch) {
+            return res.status(401).json({ error: 'La contraseña actual es incorrecta' });
+        }
+
+        // 3. Hashear y actualizar
+        const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+        const { error: updateError } = await supabase
+            .from('users_custom')
+            .update({ password: hashedNewPassword })
+            .eq('id', req.user.id);
+
+        if (updateError) throw updateError;
+
+        res.json({ message: 'Contraseña actualizada exitosamente' });
+    } catch (err) {
+        console.error('❌ Error al cambiar contraseña:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.post('/forgot-password', authLimiter, async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email) return res.status(400).json({ error: 'Email requerido' });
+
+        const normalizedEmail = email.toLowerCase().trim();
+
+        // 1. Buscar usuario
+        const { data: user, error } = await supabase
+            .from('users_custom')
+            .select('id, email')
+            .eq('email', normalizedEmail)
+            .single();
+
+        if (error || !user) {
+            // Por seguridad, no revelamos si el email existe o no
+            return res.json({ message: 'Si el correo existe, se ha enviado un enlace de recuperación' });
+        }
+
+        // 2. Generar token
+        const token = crypto.randomBytes(32).toString('hex');
+        const expires = new Date(Date.now() + 3600000); // 1 hora
+
+        // 3. Guardar token en DB (Requiere que existan las columnas reset_token y reset_expires en users_custom)
+        const { error: updateError } = await supabase
+            .from('users_custom')
+            .update({
+                reset_token: token,
+                reset_expires: expires.toISOString()
+            })
+            .eq('id', user.id);
+
+        if (updateError) {
+            console.error('❌ Error al guardar token:', updateError);
+            return res.status(500).json({ error: 'No se pudo procesar la solicitud. Verifica que la DB tenga las columnas de reset.' });
+        }
+
+        // 4. Simulación de envío de email
+        console.log('\n--- 📧 SIMULADOR DE EMAIL ---');
+        console.log(`Para: ${user.email}`);
+        console.log(`Asunto: Recuperación de contraseña - Idiomas OCW`);
+        console.log(`Enlace: http://localhost:5173/reset-password/${token}`);
+        console.log('----------------------------\n');
+
+        res.json({ message: 'Si el correo existe, se ha enviado un enlace de recuperación' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.post('/reset-password', async (req, res) => {
+    try {
+        const { token, newPassword } = req.body;
+        if (!token || !newPassword) return res.status(400).json({ error: 'Token y nueva contraseña requeridos' });
+
+        // 1. Validar token y expiración
+        const { data: user, error } = await supabase
+            .from('users_custom')
+            .select('*')
+            .eq('reset_token', token)
+            .single();
+
+        if (error || !user) {
+            return res.status(400).json({ error: 'Token inválido o expirado' });
+        }
+
+        if (new Date(user.reset_expires) < new Date()) {
+            return res.status(400).json({ error: 'El token ha expirado' });
+        }
+
+        // 2. Hashear y actualizar contraseña, limpiar token
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        const { error: updateError } = await supabase
+            .from('users_custom')
+            .update({
+                password: hashedPassword,
+                reset_token: null,
+                reset_expires: null
+            })
+            .eq('id', user.id);
+
+        if (updateError) throw updateError;
+
+        res.json({ message: 'Contraseña restablecida con éxito' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 
