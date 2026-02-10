@@ -5,6 +5,7 @@ const envSchema = z.object({
     SUPABASE_URL: z.string().url('SUPABASE_URL debe ser una URL válida'),
     SUPABASE_KEY: z.string().min(1, 'SUPABASE_KEY es requerida'),
     JWT_SECRET: z.string().min(32, 'JWT_SECRET debe tener al menos 32 caracteres para ser segura'),
+    RESEND_API_KEY: z.string().startsWith('re_', 'RESEND_API_KEY debe comenzar con "re_"'),
     PORT: z.string().optional(),
     NODE_ENV: z.enum(['development', 'production', 'test']).optional()
 });

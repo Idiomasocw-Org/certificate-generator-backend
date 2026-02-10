@@ -218,12 +218,15 @@ router.post('/forgot-password', authLimiter, async (req, res) => {
             return res.status(500).json({ error: 'No se pudo procesar la solicitud. Verifica que la DB tenga las columnas de reset.' });
         }
 
-        // 4. Simulación de envío de email
-        console.log('\n--- 📧 SIMULADOR DE EMAIL ---');
-        console.log(`Para: ${user.email}`);
-        console.log(`Asunto: Recuperación de contraseña - Idiomas OCW`);
-        console.log(`Enlace: http://localhost:5173/reset-password/${token}`);
-        console.log('----------------------------\n');
+        // 4. Enviar email real con Resend
+        try {
+            const { sendPasswordResetEmail } = await import('../lib/email.js');
+            await sendPasswordResetEmail(user.email, token);
+            console.log(`📧 Email de recuperación enviado a: ${user.email}`);
+        } catch (emailError) {
+            console.error('❌ Error al enviar email:', emailError);
+            // No revelamos el error al usuario por seguridad, pero lo logueamos
+        }
 
         res.json({ message: 'Si el correo existe, se ha enviado un enlace de recuperación' });
     } catch (err) {
