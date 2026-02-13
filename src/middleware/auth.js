@@ -1,11 +1,7 @@
-import jwt from 'jsonwebtoken';
-import dotenv from 'dotenv';
+import { supabase } from '../lib/supabase.js';
 
-dotenv.config();
-
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
-
-export const authenticateUser = (req, res, next) => {
+export const authenticateUser = async (req, res, next) => {
+    console.log(`🔍 [AUTH] Verificando token para: ${req.path}`);
     // Intentar obtener el token de cookies primero, luego de Authorization header
     const token = req.cookies.auth_token || (req.headers.authorization ? req.headers.authorization.split(' ')[1] : null);
 
@@ -14,17 +10,16 @@ export const authenticateUser = (req, res, next) => {
     }
 
     try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        req.user = decoded;
-        console.log('✅ Token verificado para:', decoded.email);
+        const { data: { user }, error } = await supabase.auth.getUser(token);
+
+        if (error || !user) throw new Error('Invalid Supabase token');
+
+        req.user = user;
+        // console.log('✅ Token verificado para:', user.email);
         next();
     } catch (error) {
-        console.error('--- Auth Error Detail ---');
-        console.error('Message:', error.message);
-        return res.status(401).json({
-            error: 'Invalid or expired token',
-            details: error.message
-        });
+        console.error('Auth Error:', error.message);
+        return res.status(401).json({ error: 'Invalid or expired token' });
     }
 };
 

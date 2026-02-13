@@ -37,6 +37,6 @@ app.use('/api/auth', authRoutes);
 app.use('/api/certificates', certificateRoutes);
 
 app.listen(PORT, () => {
-    console.log(`🚀 API Profesional corriendo en puerto ${PORT}`);
+    console.log(`🚀 API ACTUALIZADA Y CORRIENDO EN PUERTO ${PORT} !!!`);
     console.log(`🛡️  Seguridad: RLS Activo, Tokens JWT (HttpOnly), Rate Limiting, Helmet`);
 });

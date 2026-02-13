@@ -1,0 +1,24 @@
+
+> certificate-generator-backend@1.0.0 start
+> node src/index.js
+
+🔗 Conectando a Supabase: https://hpbaxcgecmxffsiwpboz.supabase.co
+🔑 Usando llave: sb_secret_...
+✅ Variables de entorno validadas correctamente
+🚀 API Profesional corriendo en puerto 3000
+🛡️  Seguridad: RLS Activo, Tokens JWT (HttpOnly), Rate Limiting, Helmet
+❌ Error al enviar email: {
+  statusCode: 403,
+  name: 'validation_error',
+  message: 'You can only send testing emails to your own email address (barbaraarias844@gmail.com). To send emails to other recipients, please verify a domain at resend.com/domains, and change the `from` address to an email using this domain.'
+}
+❌ Error en sendPasswordResetEmail: Error: No se pudo enviar el correo de recuperación
+    at sendPasswordResetEmail (file:///C:/Users/barbara/ultime%20certificate/certificate-generator-backend/src/lib/email.js:138:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async file:///C:/Users/barbara/ultime%20certificate/certificate-generator-backend/src/routes/auth.js:224:13
+❌ Error al enviar email: Error: No se pudo enviar el correo de recuperación
+    at sendPasswordResetEmail (file:///C:/Users/barbara/ultime%20certificate/certificate-generator-backend/src/lib/email.js:138:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async file:///C:/Users/barbara/ultime%20certificate/certificate-generator-backend/src/routes/auth.js:224:13
+
+C:\Users\barbara\ultime certificate\certificate-generator-backend>�M�s? 

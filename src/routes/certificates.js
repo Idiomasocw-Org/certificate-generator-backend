@@ -39,11 +39,16 @@ router.get('/', authenticateUser, async (req, res) => {
 });
 
 router.post('/', authenticateUser, async (req, res) => {
+    console.log('🚀 POST /api/certificates - Petición recibida');
     try {
         const validated = CertificateSchema.parse(req.body);
         const { studentName, level, date } = validated;
 
         // 1. Guardar en Supabase
+        const dbgMsg = `\n[${new Date().toISOString()}] ID Usuario: ${req.user?.id} Email: ${req.user?.email}\n`;
+        fs.appendFileSync('debug_inserts.log', dbgMsg);
+        console.log(dbgMsg);
+
         const { error: dbError } = await supabase
             .from('certificates_history')
             .insert([{
@@ -53,7 +58,10 @@ router.post('/', authenticateUser, async (req, res) => {
                 completion_date: date
             }]);
 
-        if (dbError) throw dbError;
+        if (dbError) {
+            console.error('❌ Error de base de datos al guardar certificado:', dbError);
+            throw dbError;
+        }
 
         // 2. Generar PDF
         const pdfBytes = await generateCertificatePDF(assetsPath, studentName, level, date);
@@ -64,7 +72,7 @@ router.post('/', authenticateUser, async (req, res) => {
     } catch (err) {
         const errorMessage = err.name === 'ZodError'
             ? 'Datos inválidos: ' + err.errors.map(e => `${e.path}: ${e.message}`).join(', ')
-            : err.message;
+            : err.message + ' !!!';
         res.status(400).json({ error: errorMessage });
     }
 });

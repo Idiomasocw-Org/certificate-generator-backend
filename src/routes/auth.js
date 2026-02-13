@@ -3,14 +3,13 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { z } from 'zod';
-import { supabase } from '../lib/supabase.js';
+import { supabase, getSupabaseUserClient } from '../lib/supabase.js';
 import { authenticateUser } from '../middleware/auth.js';
 import { authLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
 
-// Validation schemas
+// Validation schemas (kept for pre-validation)
 const registerSchema = z.object({
     email: z.string().email('Email inválido'),
     password: z.string()
@@ -24,65 +23,53 @@ const loginSchema = z.object({
     password: z.string().min(1, 'Contraseña requerida')
 });
 
+// --- REGISTRO CON SUPABASE AUTH ---
 router.post('/register', authLimiter, async (req, res) => {
     try {
-        // Validate input with Zod
         const validation = registerSchema.safeParse(req.body);
         if (!validation.success) {
-            const firstError = validation.error.errors[0];
-            return res.status(400).json({ error: firstError.message });
+            const firstError = validation.error.issues[0]?.message || 'Datos inválidos';
+            return res.status(400).json({ error: firstError });
         }
 
         const { email, password } = validation.data;
-        const normalizedEmail = email.toLowerCase().trim();
-        const hashedPassword = await bcrypt.hash(password, 10);
 
-        const { data, error } = await supabase
-            .from('users_custom')
-            .insert([{ email: normalizedEmail, password: hashedPassword }])
-            .select()
-            .single();
+        const { data, error } = await supabase.auth.signUp({
+            email,
+            password
+        });
 
-        if (error) {
-            if (error.code === '23505') return res.status(409).json({ error: 'El email ya está registrado' });
-            throw error;
-        }
-        res.status(201).json({ message: 'Usuario creado', user: { id: data.id, email: data.email } });
+        if (error) throw error;
+
+        // Si autoConfirm está desactivado, el usuario no podrá loguearse hasta verificar email
+        res.status(201).json({
+            message: 'Usuario registrado. Por favor verifica tu correo electrónico.',
+            user: data.user
+        });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(400).json({ error: err.message });
     }
 });
 
+// --- LOGIN CON SUPABASE AUTH ---
 router.post('/login', authLimiter, async (req, res) => {
     try {
-        // Validate input with Zod
         const validation = loginSchema.safeParse(req.body);
         if (!validation.success) {
-            const firstError = validation.error.errors[0];
-            return res.status(400).json({ error: firstError.message });
+            const firstError = validation.error.issues[0]?.message || 'Datos inválidos';
+            return res.status(400).json({ error: firstError });
         }
 
         const { email, password } = validation.data;
-        const normalizedEmail = email.toLowerCase().trim();
 
-        const { data: user, error } = await supabase
-            .from('users_custom')
-            .select('*')
-            .eq('email', normalizedEmail)
-            .single();
+        const { data, error } = await supabase.auth.signInWithPassword({
+            email,
+            password
+        });
 
-        if (error || !user) {
-            return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
-        }
+        if (error) return res.status(401).json({ error: 'Credenciales inválidas o email no verificado' });
 
-        const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) {
-            return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
-        }
-
-        const accessToken = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '15m' });
-        const refreshToken = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
-
+        // Establecer cookies (Supabase devuelve access_token y refresh_token)
         const cookieOptions = (maxAge) => ({
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
@@ -90,142 +77,69 @@ router.post('/login', authLimiter, async (req, res) => {
             maxAge
         });
 
-        res.cookie('auth_token', accessToken, cookieOptions(15 * 60 * 1000));
-        res.cookie('refresh_token', refreshToken, cookieOptions(7 * 24 * 60 * 60 * 1000));
+        res.cookie('auth_token', data.session.access_token, cookieOptions(data.session.expires_in * 1000));
+        res.cookie('refresh_token', data.session.refresh_token, cookieOptions(30 * 24 * 60 * 60 * 1000)); // 30 días
 
-        res.json({ user: { id: user.id, email: user.email } });
+        res.json({ user: data.user, session: data.session });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-router.post('/logout', (req, res) => {
-    const cookieOptions = {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        path: '/'
-    };
-    res.clearCookie('auth_token', cookieOptions);
-    res.clearCookie('refresh_token', cookieOptions);
+// --- LOGOUT ---
+router.post('/logout', async (req, res) => {
+    const { error } = await supabase.auth.signOut();
+
+    res.clearCookie('auth_token');
+    res.clearCookie('refresh_token');
+
+    if (error) return res.status(500).json({ error: error.message });
     res.json({ message: 'Sesión cerrada' });
 });
 
+// --- OBTENER USUARIO ACTUAL ---
 router.get('/me', authenticateUser, (req, res) => {
     res.json({ user: req.user });
 });
 
-router.post('/refresh', (req, res) => {
+// --- REFRESH TOKEN ---
+router.post('/refresh', async (req, res) => {
     const refreshToken = req.cookies.refresh_token;
+    if (!refreshToken) return res.status(401).json({ error: 'No refresh token' });
 
-    if (!refreshToken) return res.status(401).json({ error: 'No refresh token provided' });
+    const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
 
-    try {
-        const decoded = jwt.verify(refreshToken, JWT_SECRET);
-        const newAccessToken = jwt.sign({ id: decoded.id, email: decoded.email }, JWT_SECRET, { expiresIn: '15m' });
+    if (error || !data.session) return res.status(401).json({ error: 'Sesión expirada' });
 
-        res.cookie('auth_token', newAccessToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            maxAge: 15 * 60 * 1000
-        });
+    const cookieOptions = (maxAge) => ({
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge
+    });
 
-        res.json({ message: 'Token refreshed' });
-    } catch (err) {
-        res.status(401).json({ error: 'Invalid refresh token' });
-    }
+    res.cookie('auth_token', data.session.access_token, cookieOptions(data.session.expires_in * 1000));
+    res.cookie('refresh_token', data.session.refresh_token, cookieOptions(30 * 24 * 60 * 60 * 1000));
+
+    res.json({ message: 'Token refrescado' });
 });
 
-router.post('/change-password', authenticateUser, async (req, res) => {
-    try {
-        const { oldPassword, newPassword } = req.body;
-        if (!oldPassword || !newPassword) {
-            return res.status(400).json({ error: 'Se requieren ambas contraseñas' });
-        }
-
-        if (newPassword.length < 6) {
-            return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 6 caracteres' });
-        }
-
-        // 1. Obtener el usuario actual
-        const { data: user, error: fetchError } = await supabase
-            .from('users_custom')
-            .select('*')
-            .eq('id', req.user.id)
-            .single();
-
-        if (fetchError || !user) {
-            return res.status(404).json({ error: 'Usuario no encontrado' });
-        }
-
-        // 2. Verificar contraseña antigua
-        const isMatch = await bcrypt.compare(oldPassword, user.password);
-        if (!isMatch) {
-            return res.status(401).json({ error: 'La contraseña actual es incorrecta' });
-        }
-
-        // 3. Hashear y actualizar
-        const hashedNewPassword = await bcrypt.hash(newPassword, 10);
-        const { error: updateError } = await supabase
-            .from('users_custom')
-            .update({ password: hashedNewPassword })
-            .eq('id', req.user.id);
-
-        if (updateError) throw updateError;
-
-        res.json({ message: 'Contraseña actualizada exitosamente' });
-    } catch (err) {
-        console.error('❌ Error al cambiar contraseña:', err);
-        res.status(500).json({ error: err.message });
-    }
-});
-
+// --- RECUPERAR CONTRASEÑA (Trigger Email desde Supabase) ---
 router.post('/forgot-password', authLimiter, async (req, res) => {
     try {
         const { email } = req.body;
         if (!email) return res.status(400).json({ error: 'Email requerido' });
 
-        const normalizedEmail = email.toLowerCase().trim();
+        const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password`;
 
-        // 1. Buscar usuario
-        const { data: user, error } = await supabase
-            .from('users_custom')
-            .select('id, email')
-            .eq('email', normalizedEmail)
-            .single();
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+            redirectTo: resetUrl,
+        });
 
-        if (error || !user) {
-            // Por seguridad, no revelamos si el email existe o no
-            return res.json({ message: 'Si el correo existe, se ha enviado un enlace de recuperación' });
-        }
-
-        // 2. Generar token
-        const token = crypto.randomBytes(32).toString('hex');
-        const expires = new Date(Date.now() + 3600000); // 1 hora
-
-        // 3. Guardar token en DB (Requiere que existan las columnas reset_token y reset_expires en users_custom)
-        const { error: updateError } = await supabase
-            .from('users_custom')
-            .update({
-                reset_token: token,
-                reset_expires: expires.toISOString()
-            })
-            .eq('id', user.id);
-
-        if (updateError) {
-            console.error('❌ Error al guardar token:', updateError);
-            return res.status(500).json({ error: 'No se pudo procesar la solicitud. Verifica que la DB tenga las columnas de reset.' });
-        }
-
-        // 4. Enviar email real con Resend
-        try {
-            const { sendPasswordResetEmail } = await import('../lib/email.js');
-            await sendPasswordResetEmail(user.email, token);
-            console.log(`📧 Email de recuperación enviado a: ${user.email}`);
-        } catch (emailError) {
-            console.error('❌ Error al enviar email:', emailError);
-            // No revelamos el error al usuario por seguridad, pero lo logueamos
+        if (error) {
+            // Supabase protege la privacidad, pero si hay error de configuración lo logueamos
+            console.error('Supabase Reset Error:', error);
+            // No retornamos error al cliente para evitar enumeración de usuarios
         }
 
         res.json({ message: 'Si el correo existe, se ha enviado un enlace de recuperación' });
@@ -234,40 +148,108 @@ router.post('/forgot-password', authLimiter, async (req, res) => {
     }
 });
 
-router.post('/reset-password', async (req, res) => {
+// --- RESTABLECER CONTRASEÑA (Nuevo endpoint para usar en la página de reset) ---
+// Nota: En Supabase, el link del correo loguea al usuario y le da una sesión. 
+// El usuario debe llamar a updateUser con la nueva contraseña.
+const passwordSchema = z.string()
+    .min(8, 'La contraseña debe tener al menos 8 caracteres')
+    .regex(/[A-Z]/, 'La contraseña debe contener al menos una mayúscula')
+    .regex(/[0-9]/, 'La contraseña debe contener al menos un número');
+
+router.post('/update-password', authenticateUser, async (req, res) => {
     try {
-        const { token, newPassword } = req.body;
-        if (!token || !newPassword) return res.status(400).json({ error: 'Token y nueva contraseña requeridos' });
+        const { password, refreshToken } = req.body;
 
-        // 1. Validar token y expiración
-        const { data: user, error } = await supabase
-            .from('users_custom')
-            .select('*')
-            .eq('reset_token', token)
-            .single();
-
-        if (error || !user) {
-            return res.status(400).json({ error: 'Token inválido o expirado' });
+        const validation = passwordSchema.safeParse(password);
+        if (!validation.success) {
+            const firstError = validation.error.issues[0]?.message || 'Contraseña no cumple requisitos';
+            return res.status(400).json({ error: firstError });
         }
 
-        if (new Date(user.reset_expires) < new Date()) {
-            return res.status(400).json({ error: 'El token ha expirado' });
+        // Obtener el token del header para crear un cliente autenticado
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) return res.status(401).json({ error: 'Token requerido' });
+
+        console.log(`🔒 Update Password Request for: ${req.user.email}`);
+        console.log(`🔑 Refresh Token Provided: ${!!refreshToken}`);
+
+        const supabaseUser = getSupabaseUserClient(token);
+        let sessionError = null;
+
+        // 1. Intentar establecer sesión si hay refresh token
+        if (refreshToken) {
+            const { error } = await supabaseUser.auth.setSession({
+                access_token: token,
+                refresh_token: refreshToken
+            });
+            if (error) {
+                console.warn('⚠️ Falló setSession:', error.message);
+                sessionError = error;
+            } else {
+                console.log('✅ Sesión establecida correctamente');
+            }
+        } else {
+            console.warn('⚠️ No refresh_token provided. setSession skipped.');
         }
 
-        // 2. Hashear y actualizar contraseña, limpiar token
-        const hashedPassword = await bcrypt.hash(newPassword, 10);
-        const { error: updateError } = await supabase
-            .from('users_custom')
-            .update({
-                password: hashedPassword,
-                reset_token: null,
-                reset_expires: null
-            })
-            .eq('id', user.id);
+        // 2. Intentar actualizar usuario estándar
+        const { data, error } = await supabaseUser.auth.updateUser({ password });
 
-        if (updateError) throw updateError;
+        if (!error) {
+            console.log('✅ Contraseña actualizada vía updateUser');
+            return res.json({ message: 'Contraseña actualizada exitosamente' });
+        }
 
-        res.json({ message: 'Contraseña restablecida con éxito' });
+        console.error('❌ updateUser falló:', error.message);
+
+        // 3. Fallback: Intentar admin update si updateUser falló (por ejemplo por falta de sesión)
+        // Esto solo funcionará si la SUPABASE_KEY en el servidor tiene permisos de service_role.
+        try {
+            console.log('🔄 Intentando actualización administrativa (fallback)...');
+            const { data: adminData, error: adminError } = await supabase.auth.admin.updateUserById(
+                req.user.id,
+                { password: password }
+            );
+
+            if (adminError) throw adminError;
+
+            console.log('✅ Contraseña actualizada vía Admin API');
+            return res.json({ message: 'Contraseña actualizada exitosamente (admin)' });
+
+        } catch (adminErr) {
+            console.error('❌ Admin update también falló:', adminErr.message);
+            // Si ambos fallan, devolvemos el error original o el de admin
+            throw new Error(`No se pudo actualizar la contraseña. Usuario: ${error.message}. Admin: ${adminErr.message}`);
+        }
+
+    } catch (err) {
+        console.error('🔥 Error CRÍTICO en update-password:', err.message);
+        res.status(500).json({ error: 'No se pudo actualizar la contraseña. Revisa el log del servidor.' });
+    }
+});
+
+// --- CAMBIAR CONTRASEÑA (Para usuarios logueados) ---
+// Es lo mismo que update-password
+router.post('/change-password', authenticateUser, async (req, res) => {
+    try {
+        const { newPassword } = req.body;
+
+        const validation = passwordSchema.safeParse(newPassword);
+        if (!validation.success) {
+            const firstError = validation.error.issues[0]?.message || 'Contraseña no cumple requisitos';
+            return res.status(400).json({ error: firstError });
+        }
+
+        // Obtener el token del header para crear un cliente autenticado
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) return res.status(401).json({ error: 'Token requerido' });
+
+        const supabaseUser = getSupabaseUserClient(token);
+        const { error } = await supabaseUser.auth.updateUser({ password: newPassword });
+
+        if (error) throw error;
+
+        res.json({ message: 'Contraseña actualizada correctamente' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
