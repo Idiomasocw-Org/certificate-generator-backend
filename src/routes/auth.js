@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { supabase, getSupabaseUserClient } from '../lib/supabase.js';
 import { authenticateUser } from '../middleware/auth.js';
 import { authLimiter } from '../middleware/rateLimiter.js';
+import { getCookieOptions, SESSION_COOKIE_NAME, REFRESH_COOKIE_NAME } from '../lib/utils.js';
 
 const router = express.Router();
 
@@ -69,16 +70,8 @@ router.post('/login', authLimiter, async (req, res) => {
 
         if (error) return res.status(401).json({ error: 'Credenciales inválidas o email no verificado' });
 
-        // Establecer cookies (Supabase devuelve access_token y refresh_token)
-        const cookieOptions = (maxAge) => ({
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            maxAge
-        });
-
-        res.cookie('auth_token', data.session.access_token, cookieOptions(data.session.expires_in * 1000));
-        res.cookie('refresh_token', data.session.refresh_token, cookieOptions(30 * 24 * 60 * 60 * 1000)); // 30 días
+        res.cookie(SESSION_COOKIE_NAME, data.session.access_token, getCookieOptions(data.session.expires_in * 1000));
+        res.cookie(REFRESH_COOKIE_NAME, data.session.refresh_token, getCookieOptions(30 * 24 * 60 * 60 * 1000)); // 30 días
 
         res.json({ user: data.user, session: data.session });
     } catch (err) {
@@ -90,8 +83,8 @@ router.post('/login', authLimiter, async (req, res) => {
 router.post('/logout', async (req, res) => {
     const { error } = await supabase.auth.signOut();
 
-    res.clearCookie('auth_token');
-    res.clearCookie('refresh_token');
+    res.clearCookie(SESSION_COOKIE_NAME);
+    res.clearCookie(REFRESH_COOKIE_NAME);
 
     if (error) return res.status(500).json({ error: error.message });
     res.json({ message: 'Sesión cerrada' });
@@ -111,15 +104,8 @@ router.post('/refresh', async (req, res) => {
 
     if (error || !data.session) return res.status(401).json({ error: 'Sesión expirada' });
 
-    const cookieOptions = (maxAge) => ({
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge
-    });
-
-    res.cookie('auth_token', data.session.access_token, cookieOptions(data.session.expires_in * 1000));
-    res.cookie('refresh_token', data.session.refresh_token, cookieOptions(30 * 24 * 60 * 60 * 1000));
+    res.cookie(SESSION_COOKIE_NAME, data.session.access_token, getCookieOptions(data.session.expires_in * 1000));
+    res.cookie(REFRESH_COOKIE_NAME, data.session.refresh_token, getCookieOptions(30 * 24 * 60 * 60 * 1000));
 
     res.json({ message: 'Token refrescado' });
 });
