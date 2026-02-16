@@ -14,23 +14,37 @@ validateEnv(); // Validate environment variables before starting server
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuración de CORS
 app.use(cors({
     origin: (origin, callback) => {
-        const allowed = ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000'];
+        const allowed = [
+            'http://localhost:5173',
+            'http://localhost:5174',
+            'http://localhost:3000',
+            'https://certificate-generator-frontend.vercel.app' // Ejemplo de origen prod
+        ];
         if (!origin || allowed.includes(origin) || origin.endsWith('.trycloudflare.com')) {
             callback(null, true);
         } else {
             callback(new Error('CORS Blocked'));
         }
     },
-    credentials: true
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie']
 }));
 
 app.use(express.json());
 app.use(cookieParser());
 app.use(helmet()); // Basic Security headers (XSS, Clickjacking, MIME sniff)
 app.use(globalLimiter); // Apply default rate limiting to all requests
+
+app.get('/', (req, res) => {
+    res.json({
+        status: 'UP',
+        service: 'Certificate Generator API',
+        environment: process.env.NODE_ENV || 'development'
+    });
+});
 
 // Rutas moduladas
 app.use('/api/auth', authRoutes);
