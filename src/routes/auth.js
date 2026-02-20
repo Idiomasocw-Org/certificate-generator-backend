@@ -152,8 +152,8 @@ router.post('/update-password', authenticateUser, async (req, res) => {
             return res.status(400).json({ error: firstError });
         }
 
-        // Obtener el token del header para crear un cliente autenticado
-        const token = req.headers.authorization?.split(' ')[1];
+        // Obtener el token de cookies o header para crear un cliente autenticado
+        const token = req.cookies.auth_token || req.headers.authorization?.split(' ')[1];
         if (!token) return res.status(401).json({ error: 'Token requerido' });
 
         console.log(`🔒 Update Password Request for: ${req.user.email}`);
@@ -226,8 +226,8 @@ router.post('/change-password', authenticateUser, async (req, res) => {
             return res.status(400).json({ error: firstError });
         }
 
-        // Obtener el token del header para crear un cliente autenticado
-        const token = req.headers.authorization?.split(' ')[1];
+        // Obtener el token de cookies o header para crear un cliente autenticado
+        const token = req.cookies.auth_token || req.headers.authorization?.split(' ')[1];
         if (!token) return res.status(401).json({ error: 'Token requerido' });
 
         const supabaseUser = getSupabaseUserClient(token);
