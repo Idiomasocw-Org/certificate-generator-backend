@@ -44,36 +44,77 @@ router.post('/', authenticateUser, async (req, res) => {
         const validated = CertificateSchema.parse(req.body);
         const { studentName, level, date } = validated;
 
-        // 1. Guardar en Supabase
-        const dbgMsg = `\n[${new Date().toISOString()}] ID Usuario: ${req.user?.id} Email: ${req.user?.email}\n`;
-        fs.appendFileSync('debug_inserts.log', dbgMsg);
-        console.log(dbgMsg);
+        // 1. Generar PDF primero
+        const pdfBytes = await generateCertificatePDF(assetsPath, studentName, level, date);
+        const fileName = `${req.user.id}/${Date.now()}_${studentName.replace(/\s+/g, '_')}.pdf`;
 
+        // 2. Subir a Supabase Storage
+        // Intentamos subirlo al bucket 'certificates'. 
+        // Nota: Asegúrate de que el bucket sea PÚBLICO o tenga políticas RLS adecuadas.
+        const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('certificates')
+            .upload(fileName, pdfBytes, {
+                contentType: 'application/pdf',
+                upsert: true
+            });
+
+        if (uploadError) {
+            console.error('❌ Error al subir a Storage:', uploadError);
+            // Si falla el storage, igual intentamos guardar en DB o avisar
+        }
+
+        // 3. Guardar en Base de Datos (con el path del archivo)
         const { error: dbError } = await supabase
             .from('certificates_history')
             .insert([{
                 user_id: req.user.id,
                 student_name: studentName,
                 course_level: level,
-                completion_date: date
+                completion_date: date,
+                storage_path: fileName
             }]);
 
         if (dbError) {
-            console.error('❌ Error de base de datos al guardar certificado:', dbError);
+            console.error('❌ Error de base de datos:', dbError);
             throw dbError;
         }
 
-        // 2. Generar PDF
-        const pdfBytes = await generateCertificatePDF(assetsPath, studentName, level, date);
-
+        // 4. Enviar PDF para descarga inmediata con nombre limpio
         res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${studentName.replace(/\s+/g, '_')}.pdf"`);
         res.send(Buffer.from(pdfBytes));
 
     } catch (err) {
         const errorMessage = err.name === 'ZodError'
             ? 'Datos inválidos: ' + err.errors.map(e => `${e.path}: ${e.message}`).join(', ')
-            : err.message + ' !!!';
+            : err.message;
         res.status(400).json({ error: errorMessage });
+    }
+});
+
+// Nuevo endpoint para obtener la URL de descarga de un certificado guardado
+router.get('/:id/download', authenticateUser, async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('certificates_history')
+            .select('storage_path, user_id, student_name')
+            .eq('id', req.params.id)
+            .single();
+
+        if (error || !data) throw new Error('Certificado no encontrado');
+        if (data.user_id !== req.user.id) return res.status(403).json({ error: 'No tienes permiso' });
+
+        const { data: urlData } = await supabase.storage
+            .from('certificates')
+            .createSignedUrl(data.storage_path, 60, {
+                download: `${data.student_name.replace(/\s+/g, '_')}.pdf`
+            }); // URL válida por 60 segundos con nombre sugerido
+
+        if (!urlData) throw new Error('No se pudo generar el enlace de descarga');
+
+        res.json({ url: urlData.signedUrl });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 

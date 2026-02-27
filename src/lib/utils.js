@@ -1,7 +1,7 @@
 export const getCookieOptions = (maxAge) => ({
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure: true, // Siempre true para Tunnels y HTTPS
+    sameSite: 'none', // Requerido para cookies entre diferentes subdominios de Cloudflare
     maxAge
 });
 

@@ -6,8 +6,9 @@ const envSchema = z.object({
     SUPABASE_KEY: z.string().min(1, 'SUPABASE_KEY es requerida'),
     JWT_SECRET: z.string().min(32, 'JWT_SECRET debe tener al menos 32 caracteres para ser segura'),
     RESEND_API_KEY: z.string().startsWith('re_', 'RESEND_API_KEY debe comenzar con "re_"'),
-    PORT: z.string().optional(),
-    NODE_ENV: z.enum(['development', 'production', 'test']).optional()
+    PORT: z.string().default('3000'),
+    NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+    FRONTEND_URL: z.string().url('FRONTEND_URL debe ser una URL válida (ej: http://localhost:5173 o la URL de Cloudflare)').optional(),
 });
 
 export function validateEnv() {

@@ -1,7 +1,4 @@
 import express from 'express';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import crypto from 'crypto';
 import { z } from 'zod';
 import { supabase, getSupabaseUserClient } from '../lib/supabase.js';
 import { authenticateUser } from '../middleware/auth.js';

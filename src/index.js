@@ -12,27 +12,33 @@ dotenv.config();
 validateEnv(); // Validate environment variables before starting server
 
 const app = express();
+app.set('trust proxy', 1); // Confía en proxies como Cloudflare para obtener la IP real
 const PORT = process.env.PORT || 3000;
 
-// ⚠️ IMPORTANTE: Cuando despliegues el frontend, reemplaza la URL de ejemplo
-// con la URL REAL de tu frontend en producción (ej: https://tu-app.vercel.app)
+const whiteList = [
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:3000',
+    process.env.FRONTEND_URL
+].filter(Boolean);
+
 app.use(cors({
     origin: (origin, callback) => {
-        const allowed = [
-            'http://localhost:5173',
-            'http://localhost:5174',
-            'http://localhost:3000',
-            process.env.FRONTEND_URL, // URL del frontend en producción
-        ].filter(Boolean);
-        if (!origin || allowed.includes(origin)) {
+        // En desarrollo, permitimos peticiones sin origen (como Postman o apps móviles)
+        // y orígenes locales o dominios de Cloudflare Tunnel.
+        const isCloudflare = origin && origin.endsWith('.trycloudflare.com');
+        const isLocal = origin && (origin.includes('localhost') || origin.includes('127.0.0.1'));
+
+        if (!origin || whiteList.includes(origin) || isCloudflare || isLocal || process.env.NODE_ENV === 'development') {
             callback(null, true);
         } else {
-            callback(new Error('CORS Blocked'));
+            console.warn(`🔒 CORS bloqueado para el origen: ${origin}`);
+            callback(new Error('CORS Blocked by security policy'));
         }
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie']
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'X-Requested-With']
 }));
 
 app.use(express.json());
@@ -57,7 +63,7 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Error interno del servidor' });
 });
 
-app.listen(PORT, () => {
-    console.log(`🚀 API CORRIENDO EN PUERTO ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 API CORRIENDO EN: ${process.env.BASE_URL || `http://localhost:${PORT}`}`);
     console.log(`🛡️  Seguridad: RLS Activo, Tokens JWT (HttpOnly), Rate Limiting, Helmet`);
 });
