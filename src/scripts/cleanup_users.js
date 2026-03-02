@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import path from 'path';
 
-dotenv.config({ path: 'c:/Users/barbara/ultime certificate/certificate-generator-backend/.env' });
+dotenv.config();
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
@@ -33,8 +33,8 @@ async function cleanup() {
 
     console.log('👥 Usuarios encontrados en el sistema:', users.map(u => u.email).join(', ') || 'Ninguno');
 
-    const targetEmail = 'barbaraarias844@gmail.com';
-    const usersToDelete = users.filter(u => u.email !== targetEmail);
+    const targetEmails = ['barbaraarias844@gmail.com'];
+    const usersToDelete = users.filter(u => !targetEmails.includes(u.email));
 
     console.log(`🔍 Encontrados ${usersToDelete.length} usuarios para borrar.`);
 

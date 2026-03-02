@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 
-dotenv.config({ path: 'c:/Users/barbara/ultime certificate/certificate-generator-backend/.env' });
+dotenv.config();
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
@@ -9,8 +9,9 @@ const supabaseKey = process.env.SUPABASE_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function createUser() {
-    const email = 'barbaraburoz@gmail.com';
-    const password = '134340btsbarBK';
+    const email = process.env.ADMIN_EMAIL || 'admin@example.com';
+    const password = process.env.ADMIN_PASSWORD || 'ChangeMe123!';
+    // IMPORTANTE: Configura estas variables en tu .env local antes de ejecutar este script
 
     console.log(`🔍 Buscando si existe rastro de: ${email}...`);
     const { data: { users }, error: listError } = await supabase.auth.admin.listUsers();
